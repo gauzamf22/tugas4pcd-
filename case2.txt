@@ -1,0 +1,123 @@
+CATATAN KASUS 2
+Segmentasi dan Klasifikasi Subtipe Sel Darah Putih
+
+
+1. LATAR BELAKANG
+
+Penghitungan diferensial sel darah putih menentukan proporsi empat subtipe
+(eosinofil, limfosit, monosit, neutrofil) dalam sediaan apus darah. Hitung
+manual melelahkan dan tidak konsisten antar pengamat. Kasus ini dipilih karena
+pertanyaannya bersifat SEGMENTASI lalu KLASIFIKASI yang dicari lebih dulu
+adalah batas organel, baru kemudian kategori.
+
+
+2. DATASET
+
+Sumber     : Blood Cell Images (Kaggle)
+URL        : https://www.kaggle.com/datasets/paultimothymooney/blood-cells
+Lisensi    : Other (sesuai deskripsi penyedia), untuk keperluan riset
+Ukuran     : 113,4 MB, 12.500 citra pada subset TRAIN
+Resolusi   : 240 x 320 piksel, RGB JPEG
+Kelas      : EOSINOPHIL, LYMPHOCYTE, MONOCYTE, NEUTROPHIL
+Dipakai    : 400 citra per kelas = 1.600 citra, stratified, random_state=42
+
+
+3. METODE
+
+a. Pemangkasan bingkai
+   Crop asli mengandung bingkai hitam di tepi (piksel sudut bernilai 0). Bingkai
+   dihapus dengan threshold 12 pada grayscale, mengambil bounding box komponen
+   terbesar, lalu menambah margin 10 piksel. Tanpa langkah ini, bingkai hitam
+   mendominasi hasil Otsu.
+
+b. Peningkatan nukleus
+   Rasio warna (R+B)/(2G) bernilai besar di nukleus yang ungu gelap dan kecil di
+   sitoplasma yang pucat. Pada dataset ini G = 0 di dalam bingkai, sehingga rasio
+   tidak terdefinisi. Penyebut dijaga menjadi (R+B+1)/(2G+1).
+
+c. Segmentasi nukleus
+   Otsu pada citra hasil peningkatan, lalu opening elips 3x3 dan closing elips
+   7x7, kemudian hanya komponen terbesar di atas 400 piksel yang dipertahankan.
+
+d. Segmentasi badan sel
+   Elips dicocokkan pada kontur nukleus, lalu diperbesar dengan faktor 1,45 dan
+   digabung dengan nukleus sehingga nukleus dijamin subset dari sel.
+
+e. Sitoplasma
+   Sel dikurangi nukleus. Nukleus menempati rata-rata 0,417 dari mask sel.
+
+f. Fitur (13 buah, Topik 10)
+   Nukleus: luas, keliling, roundness, solidity, eksentrisitas, rasio luas
+   nukleus/sel, panjang skeleton per luas (proksi lobus). Statistik intensitas
+   orde satu pada nukleus dan sitoplasma: rata-rata, simpangan baku, dan entropi
+   Shannon 16 bin.
+
+g. Pengklasifikasi
+   Linear Discriminant Analysis dan Gaussian Naive Bayes pada fitur
+   terstandardisasi, 5-fold stratified cross validation, seed tetap.
+
+
+4. HASIL
+
+Tabel 1. Skor per subtipe, pengklasifikasi terbaik (LDA), 1.600 citra.
+
+  Subtipe       Precision   Recall   F1      Support
+  -----------------------------------------------------
+  Eosinophil    0,629       0,360    0,458   400
+  Lymphocyte    0,588       0,542    0,564   400
+  Monocyte      0,613       0,805    0,696   400
+  Neutrophil    0,568       0,677    0,618   400
+  -----------------------------------------------------
+  Macro avg     0,600       0,596    0,584   1.600
+
+Akurasi keseluruhan : 0,596
+Macro-F1            : 0,584
+LDA 5-fold          : 0,596
+GaussianNB 5-fold   : 0,506
+Waktu proses        : 179,6 detik untuk 1.600 citra (112,3 ms per citra)
+
+
+5. TEMUAN PENTING
+
+a. Dua kesalahan implementasi yang ditemukan lewat pengukuran, bukan dugaan.
+
+   1) Histogram equalization setelah peningkatan rasio warna MEMBALIK mask.
+      Diukur pada subsampel: porsi foreground Otsu berubah dari 0,05 tanpa
+      equalization menjadi 0,55 dengan equalization. Penyebabnya, histogram
+      rasio hampir unimodal di sekitar nilai 1, sehingga equalization mendorong
+      sitoplasma ke atas ambang. Langkah ini dihapus.
+
+   2) Klip persentil 1-99 pada rasio membuat nukleus runtuh. Rasio mentah
+      mencapai nilai di atas 50 pada segelintir piksel spekular, sementara
+      mediannya sekitar 1, jadi klip 1-99 memakukan kedua ujung ramp. Klip
+      diganti menjadi 5-95, dan porsi nukleus menjadi wajar (median 7,2% dari
+      crop).
+
+b. Mask gelap tidak bisa dipakai untuk badan sel.
+   Menginterseksikan mask sel dengan mask piksel gelap menyisakan nukleus
+   sebagai hampir seluruh sel: rasio nukleus/sel terukur 0,93, padahal nilai
+   yang wajar 0,4-0,6. Sebabnya, nukleus justru struktur TERGELAP di citra.
+   Karena itu dipakai pendekatan elips yang diperbesar, sesuai maksud metode
+   rujukan, yang pada dataset ini tidak menyediakan kalibrasi mikrometer.
+
+c. Kesalahan terkonsentrasi pada dua pasangan.
+   Sel off-diagonal terbesar mengalir dari eosinofil ke neutrofil, lalu dari
+   limfosit ke monosit. Ini masuk akal untuk deskripsi berbasis bentuk: neutrofil
+   yang dua lobus nukleusnya menyatu menjadi satu komponen akan terbaca sangat
+   mirip eosinofil, dan statistik intensitas tidak memisahkan keduanya karena
+   keduanya bergranulasi padat.
+
+d. Akurasi 0,596 memang rendah, tetapi di atas baseline.
+   Baseline kelas mayoritas 0,25. Nilainya dilaporkan apa adanya, tanpa
+   menyetel hiperparameter untuk menaikkannya, karena keterbatasan yang
+   sebenarnya adalah segmentasi nukleus pada sel berlobus, bukan pengklasifikasi.
+
+
+6. CATATAN
+
+- Terdapat dua penyimpangan dari metode rujukan yang dinyatakan terbuka:
+  penjaga +1 pada penyebut rasio warna, dan penggantian pencocokan elips pada
+  mikrograf terkalibrasi dengan perbesaran elips dari nukleus.
+- Perbandingan dengan angka akurasi paper rujukan hanya berlaku sebagai TREN,
+  bukan klaim kesetaraan: data berbeda, protokol berbeda, dan kalibrasi tidak
+  tersedia.

@@ -1,0 +1,125 @@
+CATATAN KASUS 1
+Deteksi dan Kuantifikasi Retak Beton 
+
+1. LATAR BELAKANG
+
+Retak pada permukaan beton adalah indikator kerusakan struktur yang paling awal
+terlihat. Pemeriksaan manual memakan waktu dan bersifat subjektif, sehingga
+pengolahan citra digital dipakai untuk mendeteksi retak secara otomatis dan
+mengukur lebarnya. Kasus ini dipilih karena pertanyaannya bersifat DETEKSI:
+yang dicari adalah lokasi ketidakkontinuan intensitas, bukan kategori objek.
+
+
+2. DATASET
+
+Sumber     : Concrete Crack Images for Classification (Kaggle)
+URL        : https://www.kaggle.com/datasets/arnavr10880/concrete-crack-images-for-classification
+Asal       : Ozgenel, Mendeley Data V2, 2019
+Lisensi    : CC BY 4.0
+Ukuran     : 245,5 MB, 40.000 citra (20.000 Positive, 20.000 Negative)
+Resolusi   : 227 x 227 piksel, RGB JPEG
+Dipakai    : 1.600 citra (800 per kelas), stratified subsample, random_state=42
+
+
+3. METODE
+
+a. Preprocessing
+   Konversi ke grayscale, lalu GaussianBlur 5x5 untuk menekan noise sensor
+   sebelum operator turunan dihitung.
+
+b. Tahap tepi (Topik 9)
+   Magnitudo Sobel dihitung dari kernel 3x3 pada arah x dan y, kemudian
+   dinormalisasi ke 0-255. Sebagai pembanding, Canny dengan ambang 50/150 juga
+   dihitung.
+
+c. Tahap threshold (Topik 7)
+   Otsu diterapkan pada citra grayscale yang sudah diinversi, sehingga retak
+   yang gelap menjadi foreground. Otsu dipilih karena bebas parameter, jadi
+   tidak ada ambang yang perlu disetel dan tidak ada informasi dari data uji
+   yang bocor ke proses pelatihan.
+
+d. Pembersihan morfologi (Topik 8)
+   Opening dengan elemen elips 3x3 untuk menghapus bintik, lalu closing dengan
+   elemen elips 5x5 untuk menyambung segmen retak yang terputus. Setelah itu
+   komponen terhubung dengan luas di bawah 150 piksel (sekitar 0,3% dari frame
+   227x227) dibuang.
+
+e. Pengukuran lebar retak
+   Skeleton dihitung dengan algoritma Zhang-Suen (karena pustaka yang tersedia
+   tidak menyediakan thinning), lalu jarak Euclidean dihitung dengan
+   distanceTransform. Lebar retak = 2 x rata-rata jarak pada piksel skeleton.
+
+f. Fitur morfologi (Topik 10)
+   Sepuluh fitur per citra: luas, keliling, roundness, extent, eksentrisitas,
+   solidity, panjang skeleton, lebar rata-rata, jumlah komponen, dan panjang
+   skeleton per diagonal frame.
+
+g. Aturan keputusan
+   Decision tree kedalaman 4 pada kesepuluh fitur, dievaluasi dengan 5-fold
+   stratified cross validation. Pohon dipilih karena cukup dalam untuk menyatakan
+   interaksi bentuk-vs-jumlah-komponen, tetapi masih dangkal sehingga split-nya
+   bisa dibaca.
+
+
+4. HASIL
+
+Tabel 1. Ablasi tahap mask (1.600 citra), aturan yang sama dilatih ulang tiap tahap.
+
+  Tahap mask          Accuracy   Precision   Recall   F1
+  ------------------------------------------------------
+  Otsu saja           0,977      0,982       0,971    0,977
+  + opening/closing   0,976      0,979       0,973    0,976
+  + filter luas       0,970      0,969       0,971    0,970
+
+Tahap akhir    : accuracy 0,970, precision 0,969, recall 0,971, F1 0,970
+Confusion      : dari 800 citra tanpa retak, 775 benar dan 25 salah
+                 dari 800 citra retak, 23 salah dan 777 benar
+Lebar retak    : 16,5 piksel (diukur pada true positive)
+Pembanding     : Canny F1 0,945; Sobel langsung ke aturan yang sama F1 0,971
+Waktu proses   : 439,3 detik untuk 1.600 citra (274,5 ms per citra)
+
+
+5. TEMUAN :
+
+a. Aturan berbasis luas foreground GAGAL, dan gagal secara diam-diam.
+   Jika citra dinyatakan retak ketika mask menutupi lebih dari persentase
+   tertentu frame, SEMUA citra dinyatakan retak. Penyebabnya terukur: median
+   cakupan mask adalah 44,9% untuk permukaan TANPA retak dan 9,2% untuk
+   permukaan RETAK. Arahnya terbalik dari intuisi bahwa retak menambah
+   foreground, karena threshold pada permukaan beton menandai tekstur sama
+   mudahnya dengan menandai retak.
+
+b. Yang memisahkan kelas adalah BENTUK, bukan jumlah.
+   Median jumlah komponen 7 untuk tanpa retak dan 1 untuk retak. Median
+   panjang skeleton komponen terbesar 1.728 piksel untuk tanpa retak dan 280
+   untuk retak. Pada permukaan retak, retak bertahan sebagai satu struktur
+   panjang; pada permukaan utuh, tekstur bertahan sebagai banyak bintik pendek.
+
+c. Morfologi justru MENURUNKAN akurasi sedikit (0,977 -> 0,970).
+   Alasannya, panjang skeleton per diagonal menyumbang 0,94 dari total
+   importance pohon, dan besaran itu diukur pada komponen terbesar. Opening,
+   closing, dan filter luas semuanya bekerja dengan mengecilkan komponen kecil
+   dan menyatukan komponen besar, sehingga tidak mengubah deskripsi yang sudah
+   didominasi komponen terbesar. Morfologi tetap berguna untuk konsumsi manusia
+   (inspektor melihat mask, bukan sepuluh angka), tetapi bukan keuntungan
+   akurasi pada dataset ini.
+
+d. Sobel setara dengan jalur threshold (F1 0,971 vs 0,970).
+   Kernel Sobel 3x3 sudah membawa penghalusan sendiri. Canny paling lemah
+   (0,945) karena dua ambang hysteresis-nya berupa konstanta tetap yang tidak
+   disetel per citra.
+
+
+6. CATATAN
+
+- Lebar retak sengaja dilaporkan dalam PIXEL. Dataset ini tidak menerbitkan
+  kalibrasi fisik, dan crop tidak membawa acuan skala. Konversi ke milimeter
+  akan memerlukan asumsi bidang pandang, sehingga angkanya akan menjadi
+  karangan, bukan pengukuran.
+- Implementasi Zhang-Suen ditulis sendiri. Versi pertama salah karena operasi
+  (1 - P) pada uint8 mengalami underflow menjadi 255, sehingga hitungan
+  persilangan A(P1) tidak pernah bernilai 1 dan thinning berhenti sebelum
+  waktunya. Perbaikannya: seluruh aritmetika dilakukan pada dtype bertanda.
+- Skeleton dihitung SEKALI per mask, bukan per komponen. Versi per komponen
+  memakan sekitar 50 ms per citra karena mask negatif yang penuh tekstur punya
+  ratusan komponen, dan itu mendominasi waktu proses.

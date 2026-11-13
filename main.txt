@@ -1,0 +1,925 @@
+======================================================================
+HALAMAN 1 dari 7
+======================================================================
+
+Manuscript received November 13, 2026; revised November 13, 2026; accepted November 13, 2026. Date of publication November 13,
+2026; date of current version November 13, 2026.
+Digital Object Identifier
+Digital Image Processing for Surface
+Defect, Blood Cell, and Grain Quality
+Analysis: A Feature-Centered Study of
+Morphological, Edge, and Boundary
+Descriptors
+MUHAMMAD GAUZA FALIHA1
+1Department of Computer Science and Electronics, Faculty of Mathematics and Natural Sciences, Universitas Gadjah Mada, Yogyakarta, Indonesia (e-mail:
+muhammadgauzafaliha@mail.ugm.ac.id)
+Corresponding author: Wahyono, S.Kom., Ph.D.
+This work was prepared as the fourth assignment of the Digital Image Processing course, Department of Computer Science and
+Electronics, Faculty of Mathematics and Natural Sciences, Universitas Gadjah Mada, supervised by Wahyono, S.Kom., Ph.D. No external
+funding was received.
+ABSTRACT A recurring question in applied image analysis is not whether a classifier can be trained,
+but which description of the image carries the decision. This work answers that question for three
+inspection settings solvable without learned representations: a surface defect, a cytological typing task,
+and an agricultural grading task. For each we survey the morphological, edge, and representation operation
+families, implement a complete pipeline, and ablate the descriptor set. Concrete cracks are recovered by
+gradient magnitude and Otsu thresholding, cleaned by opening and closing, filtered by component area,
+and described by ten shape features of which logged skeleton length and component count are decisive;
+on 1600 images the pipeline reaches accuracy 0.970 and crack-class F1 0.970, with a measured width of
+16.5 pixels. A foreground-area rule fails here: median mask coverage is 44.9 percent for uncracked against
+9.2 percent for cracked surfaces, the opposite of the intuitive direction. White blood cell nuclei are isolated
+by a guarded ratio-color enhancement with an ellipse-expanded cell body, and thirteen region and intensity
+features with a linear discriminant reach accuracy 0.596 over four subtypes. Rice grains are described by
+nine shape measurements, seven Hu moments, and an eight-bin chain-code histogram, where shape alone
+reaches macro-F1 0.961 while the full 24-feature vector falls to 0.955. Feature suitability is thus set by the
+task type rather than the object domain, and a descriptor invariant to the wrong transformation adds variance
+instead of information.
+INDEX TERMS boundary descriptors, concrete crack detection, edge detection, feature extraction, Hu
+moments, mathematical morphology, rice variety classification, white blood cell segmentation
+I. INTRODUCTION
+D
+IGITAL image processing (DIP) is often presented as
+a set of operators to be memorized, but in practice
+the operators are chosen by the question being asked. A
+pipeline that asks where an intensity discontinuity lies needs
+a derivative estimator and a decision rule on its magnitude.
+A pipeline that asks which object is present needs a re-
+gion description that is invariant to the object’s position. A
+pipeline that asks which category the object belongs to needs
+a description whose variability within a category is smaller
+than its variability between categories. The three questions
+are different, and the third assignment block of the course
+makes the distinction concrete by separating morphological
+processing, edge-based feature extraction, corner and line
+extraction, and edge-based feature representation.
+This paper takes that separation seriously and tests it. We
+select three cases that are solvable by classical techniques
+alone, one for each of the three question types above, and
+for each case we (i) survey the operation families that the
+literature uses, (ii) build a complete pipeline from those fam-
+1
+
+======================================================================
+HALAMAN 2 dari 7
+======================================================================
+
+Muhammad Gauza Faliha: Digital Image Processing for Surface Defect, Blood Cell, and Grain Quality Analysis
+ilies, (iii) measure the pipeline’s behaviour on a real public
+dataset, and (iv) ablate the feature representation to determine
+which descriptors actually carry the decision. The cases
+are deliberately drawn from unrelated domains, because the
+claim under test is that the task type, not the object domain,
+determines the suitable feature family.
+The first case is surface defect inspection: detecting and
+quantifying cracks in concrete. Crack detection has a long
+classical literature, and critical reviews of it organize the field
+around thresholding, edge detection, and morphology before
+the recent shift toward learned detectors [8]. We follow the
+thresholding-plus-filtering lineage represented by Talab et al.
+[5] and measure how much each pipeline stage contributes.
+The second case is cytology: segmenting white blood cell
+nuclei and separating four subtypes. The reference method
+of Prinyakupt and Pluempitiwiriyawej [6] is a compact clas-
+sical pipeline, a color-ratio enhancement for the nucleus,
+ellipse fitting for the cell boundary, and a feature vector
+of morphological and intensity statistics classified by linear
+discriminant analysis and naive Bayes; it therefore isolates
+exactly the feature families this assignment is about.
+The third case is agricultural grading: classifying rice vari-
+eties from single grain images. Cinar and Koklu [7] describe
+the morphology-and-moment feature set that we adopt, and a
+later deep-learning study on the same data [11] provides the
+contrast that motivates keeping the classical branch in scope
+here.
+The contributions of the paper are:
+• a complete, reproducible classical pipeline for crack
+detection with an explicit stage-by-stage ablation of
+thresholding, morphological cleanup, and area filtering,
+plus a skeleton-based measurement of crack width (Sec-
+tion III-A);
+• a nucleus segmentation and four-class subtype classi-
+fication built on a guarded color-ratio enhancement,
+with an explicit statement of where our implementation
+deviates from the reference method and why (Section
+III-B);
+• a three-way feature ablation, morphology versus Hu
+moments versus chain code, on single-grain variety
+classification, which answers the assignment’s question
+of which descriptors are suitable for a shape-defined
+class (Section III-C);
+• a cross-case feature map that ties task type to winning
+descriptor family and to the failure mode observed in
+our own runs (Section IV).
+Section II surveys the operations and descriptors used,
+Section III reports the three experiments, Section IV com-
+pares them, and Section V concludes.
+II. MATERIALS AND METHODS
+A. DATASETS
+All three experiments use public datasets, subsampled with
+a fixed seed so that every table in this paper can be regen-
+erated. Table 1 lists them. The crack images are the fixed-
+size two-class collection derived from the concrete crack
+TABLE 1: Datasets used. Counts are the stratified subsample
+processed; the parenthesised figure is the full collection size.
+Public URLs are given in Section II-A.
+Case
+Source
+Used
+Resolution / licence
+Crack
+Özgenel [9]
+1600 (40 000)
+2272, CC BY 4.0
+WBC
+Mooney [12]
+1600 (12 500)
+240×320, research
+use
+Rice
+Koklu et al. [11]
+1000 (75 000)
+2502, CC0
+imagery of Özgenel [9], distributed as 227 × 227 crops;
+the alternative SDNET2018 collection [10] is larger but
+has variable resolution and annotated sub-images, which
+would add a resampling variable to a study of morpho-
+logical operators, so the fixed-size collection is preferred
+here. The blood cell images come from the Kaggle blood
+cell collection [12], which provides four stained subtypes
+at 240 × 320. The rice grain images are the single-grain
+collection of Koklu et al. [11], five varieties on a uniform
+dark background. Dataset licence and size metadata in Table
+1 were read from the provider’s programmatic record at
+the access date. The three collections are publicly available
+at
+https://www.kaggle.com/datasets/arnavr10880/concrete-
+crack-images-for-classification,
+https://www.kaggle.com/
+datasets/paultimothymooney/blood-cells, and https://www.
+kaggle.com/datasets/muratkokludataset/rice-image-dataset
+respectively, and the experiment code that consumes them
+is https://github.com/ (repository link to be added on submis-
+sion).
+B. COMMON PREPROCESSING
+Every pipeline begins with colour conversion to a single
+intensity channel, because the operators used downstream
+are defined on scalar images. Conversion to luminance is
+followed by Gaussian smoothing, which suppresses sensor
+noise before any derivative is taken; the kernel is 5 × 5 with
+σ derived from the kernel size, and the choice is held constant
+across cases so that differences between cases are attributable
+to the descriptors and not to the smoothing.
+Global thresholding uses Otsu’s method [1], which
+chooses the threshold that maximizes the between-class vari-
+ance of the intensity histogram. Its appeal here is that it
+is parameter-free, so a pipeline built on it has no tuned
+threshold to leak information from the test data. Where a
+case requires contrast normalization, histogram equalization
+is applied after the colour-ratio enhancement rather than to
+the raw channels, so that the enhancement’s dynamic range
+is what gets equalized.
+C. MORPHOLOGICAL PROCESSING
+Mathematical morphology treats a binary image as a set A ⊆
+Z2 and a structuring element as a set B, following the course
+development of the operators [14]. Translation of A by z is
+Az = {a + z | a ∈A}, and the reflection is ˆB = {−b | b ∈
+2
+
+======================================================================
+HALAMAN 3 dari 7
+======================================================================
+
+Muhammad Gauza Faliha: Digital Image Processing for Surface Defect, Blood Cell, and Grain Quality Analysis
+B}. The two primitives are dilation and erosion,
+A⊕B = {z | ( ˆB)z ∩A̸ = ∅},
+A⊖B = {z | Bz ⊆A},
+(1)
+which respectively expand and contract the foreground, the
+first filling small gaps and the second removing small protru-
+sions. They are not inverses, and the two compositions that
+survive as useful filters are opening and closing,
+A ◦B = (A ⊖B) ⊕B,
+A • B = (A ⊕B) ⊖B. (2)
+Opening removes foreground detail smaller than B and is
+therefore a speckle-killer; closing removes background detail
+smaller than B and is therefore a gap-bridger. Because both
+are idempotent, applying them twice changes nothing, which
+makes their effect on a reported mask auditable.
+Two further operators appear in the survey and in our
+measurements. The hit-or-miss transform detects a specific
+local configuration by eroding with one structuring element
+and the complement with another,
+A ⊛(B1, B2) = (A ⊖B1) ∩(Ac ⊖B2),
+(3)
+and thinning is the iterative removal of the configurations that
+hit-or-miss identifies as redundant,
+A ⊗B = A −(A ⊛B),
+(4)
+repeated until no change occurs. A skeleton is the limit of
+thinning with a sequence of structuring elements; it is the rep-
+resentation we use to convert a crack mask of arbitrary width
+into a centreline whose length is measurable. Equation (4) is
+the basis of the Zhang–Suen procedure [13] implemented in
+this work, since the standard Python imaging stack available
+here does not expose a thinning routine.
+The structuring elements used are ellipses, which are less
+directional than squares and therefore do not impose a pre-
+ferred orientation on anisotropic objects. The crack case uses
+a 3×3 element for opening and a 5×5 element for closing; the
+cell case uses 3×3, 7×7, and 15×15 elements at successive
+stages; the rice case uses a 7×7 element only for hole filling,
+since a single convex grain needs little cleanup.
+D. EDGE DETECTION
+An edge is a local maximum of the first derivative or a zero
+crossing of the second. The discrete approximations differ in
+the neighbourhood they use and in their noise sensitivity. The
+Roberts operators are 2 × 2 crosses,
+Gx =
+1
+0
+0
+−1
+
+,
+Gy =
+ 0
+1
+−1
+0
+
+,
+(5)
+and are the cheapest and noisiest. The Sobel operators are
+3 × 3 and include a smoothing direction orthogonal to the
+differentiation direction,
+Gx =
+
+
+−1
+0
+1
+−2
+0
+2
+−1
+0
+1
+
+,
+Gy =
+
+
+−1
+−2
+−1
+0
+0
+0
+1
+2
+1
+
+,
+(6)
+so their gradient magnitude ∥∇f∥=
+q
+G2x + G2y is al-
+ready partly denoised. The Laplacian-of-Gaussian approach
+smooths first and then detects zero crossings of the second
+derivative, which localizes well but responds to both polari-
+ties of the step.
+Canny’s formulation [2] makes the three stages explicit:
+optimal smoothing, non-maximum suppression along the
+gradient direction, and hysteresis thresholding with two lev-
+els. Its stated optimality criteria are detection, localization,
+and a single response per edge, and those criteria are what the
+stage model operationalizes. We therefore report Canny as a
+comparator for the crack case but build the measured pipeline
+on Sobel magnitude, because the hysteresis thresholds are
+two free parameters while the stage model in Section III-A
+needs the raw gradient available for thresholding.
+The same survey covers corner and line features, which
+complete the block but are not used by any case in this
+paper. Harris and Stephens [3] characterize a corner by the
+eigenvalues of the summed second-moment matrix over a
+window, and Duda and Hart [4] accumulate votes in a pa-
+rameter space so that collinear boundary points reinforce one
+another. Both are the right tool when the object of interest is
+a junction or a straight boundary; none of our three cases has
+that structure, so we cite them as surveyed alternatives rather
+than as components.
+E. FEATURE REPRESENTATIONS
+The assignment’s central question is which representation to
+use, so the representations are treated as the object of study
+rather than as an implementation detail.
+Region descriptors. For a region of area A and perimeter
+P, the compactness or roundness
+R = 4πA
+P 2
+(7)
+equals one for a disc and falls toward zero as the boundary
+becomes convoluted. Solidity, the ratio of A to the area of
+the convex hull, measures concavity; extent, the ratio of A
+to the bounding-box area, measures how fully the region fills
+its box. Eccentricity follows from the second-order central
+moments,
+e =
+s
+1 −(µ20 −µ02)2 + 4µ2
+11
+(µ20 + µ02)2
+,
+(8)
+and separates elongated from circular regions. These five
+numbers plus area and perimeter form the morphological part
+of the crack and grain feature vectors.
+Moments. Hu’s seven moments are normalized central
+moments chosen to be invariant to translation, scale, and rota-
+tion. Because their dynamic range spans orders of magnitude,
+they are used in the log-transformed form
+hi = −sgn(ϕi) log10|ϕi|,
+(9)
+which makes them comparable across images and suitable as
+classifier inputs.
+3
+
+======================================================================
+HALAMAN 4 dari 7
+======================================================================
+
+Muhammad Gauza Faliha: Digital Image Processing for Surface Defect, Blood Cell, and Grain Quality Analysis
+Boundary descriptors. A boundary traversed as a sequence
+of points yields a chain code: each step is quantized to one
+of eight directions, giving a string over an eight-symbol
+alphabet. The first difference of the code, taken modulo eight,
+is invariant to the choice of starting point, and the minimal
+cyclic rotation of the first difference is the shape number
+of the boundary. Because a full shape number is a variable-
+length string, we use its symbol histogram,
+c =
+n0
+N , . . . , n7
+N
+
+,
+N =
+7
+X
+k=0
+nk,
+(10)
+as an eight-dimensional descriptor, where nk counts occur-
+rences of first-difference symbol k. This captures the curva-
+ture mix of the boundary: a smooth ellipse concentrates mass
+in a few symbols, a rough grain spreads it.
+Intensity statistics. First-order statistics of a masked re-
+gion, its mean and standard deviation, plus Shannon entropy
+over a 16-bin histogram,
+H = −
+16
+X
+i=1
+pi log2 pi,
+(11)
+describe how the stain distributes inside an organelle inde-
+pendently of its shape, and are the natural companion to the
+morphological features in the cell case.
+The surveyed representations also include polygonal ap-
+proximation and the signature, which are not used here: the
+grain boundaries are well approximated by an ellipse, so a
+polygon would add vertices without adding information, and
+the signature is a plot rather than a fixed-length vector.
+F. CLASSIFIERS AND PROTOCOL
+Three classifier families are used, chosen to match the refer-
+ence methods rather than to maximize accuracy. Linear dis-
+criminant analysis projects onto the direction that maximizes
+between-class over within-class scatter and is the classifier
+of the reference cell method; Gaussian naive Bayes models
+each feature independently per class and is the reference
+method’s second comparator; the k-nearest-neighbour rule
+and a linear support vector machine cover the grain case,
+where the classes are expected to be separable by a simple
+boundary in descriptor space.
+All reported scores are five-fold stratified cross-validation
+with a fixed seed, so every image is predicted exactly once
+by a model that did not see it. For the crack case, where
+the measured quantity is a mask rather than a class label, the
+same protocol is applied to the image-level decision rule, and
+the threshold that converts a mask into a decision is selected
+on one half of the data and reported on the whole subsample
+so that the selection is visible.
+III. RESULTS
+A. CASE 1
+The crack pipeline follows the thresholding-and-filtering lin-
+eage [5], [8]. The image is converted to luminance, smoothed,
+TABLE 2: Case 1, mask-stage ablation on 1600 images.
+Precision, recall, and F1 refer to the crack class.
+Mask stage
+Accuracy
+Precision
+Recall
+F1
+Otsu only
+0.977
+0.982
+0.971
+0.977
++ opening/closing
+0.976
+0.979
+0.973
+0.976
++ area filter
+0.970
+0.969
+0.971
+0.970
+and processed along two branches: a gradient branch com-
+puting the Sobel magnitude of (6), and a threshold branch
+computing Otsu’s threshold on the inverted smoothed im-
+age, which makes a dark crack foreground. Each branch is
+followed by opening, closing, and the removal of connected
+components smaller than 150 pixels, about 0.3% of the 2272
+frame.
+The interesting measurement of this case is that a
+foreground-area decision rule fails here, and it fails silently.
+If an image is declared cracked whenever its cleaned mask
+covers more than a fixed fraction of the frame, every image
+is declared cracked, because thresholding a concrete surface
+marks texture as readily as it marks a crack: measured on
+the subsample, the median mask coverage is 44.9% for
+uncracked surfaces and 9.2% for cracked, so the classes differ
+in coverage in the opposite direction from the intuition that a
+crack adds foreground. What separates them is not how much
+is marked but how it is shaped: the median component count
+is 7 for uncracked and 1 for cracked surfaces, and the median
+skeleton length of the largest component is 1728 pixels for
+uncracked against 280 for cracked, because on a cracked
+surface the crack survives cleaning as one long connected
+structure while on an uncracked surface the texture survives
+as many short blobs.
+The operating rule is therefore a classifier on the ten-
+element descriptor of Section II-E, fitted per mask stage so
+that the stage ablation compares like with like. The decision
+is made by a depth-four decision tree, which is deep enough
+to express the shape-versus-count interaction above and shal-
+low enough that its splits remain readable.
+Table 2 ablates the three mask stages on the full subsample,
+with the same depth-four rule refitted at each stage. The result
+is the opposite of the usual morphological claim and is worth
+stating plainly: the raw threshold scores highest, and each
+subsequent cleaning stage costs a fraction of a point. The
+reason is that the descriptor set already contains the shape
+information that cleaning is meant to supply. Skeleton length
+per frame diagonal carries 0.94 of the tree’s total importance,
+and that quantity is measured on the largest component, so
+opening, closing, and area filtering – all of which exist to
+shrink small components and fuse large ones – change a de-
+scription that is already dominated by the largest component.
+On this collection morphology is therefore clean-up that a
+downstream consumer would want (a human inspector looks
+at a mask, not at ten numbers) but not an accuracy gain, and
+reporting it as one would be a claim our measurement does
+not support.
+The final stage reaches accuracy 0.970 with precision
+4
+
+======================================================================
+HALAMAN 5 dari 7
+======================================================================
+
+Muhammad Gauza Faliha: Digital Image Processing for Surface Defect, Blood Cell, and Grain Quality Analysis
+0.969, recall 0.971, and F1 0.970; of the 800 uncracked
+images 775 are called uncracked and 25 are called cracked,
+and of the 800 cracked images 23 are called uncracked and
+777 are called cracked. On the same subsample the Canny
+comparator of Section II-D reaches crack-class F1 0.945, and
+the gradient branch fed directly to the same descriptor-and-
+tree rule reaches 0.971. The gradient branch thus matches
+the threshold branch, which is a stronger statement about
+Sobel than about morphology: the 3 × 3 Sobel kernel of (6)
+already carries its own smoothing, and once the decision is
+made on the largest component’s skeleton rather than on total
+foreground, the derivative’s sensitivity to concrete texture
+stops mattering. Canny is the weakest of the three because
+its two hysteresis thresholds are fixed constants that were not
+tuned per image, which is exactly the parameter sensitivity
+that motivated building the measured pipeline on Sobel in
+the first place.
+Crack width is measured on true positives by sampling
+the Euclidean distance transform along the skeleton and
+doubling the mean distance, which yields 16.5 pixels. This
+figure is deliberately left in pixels. The collection publishes
+no physical calibration, the crops carry no scale reference,
+and converting to millimetres would require assuming a field
+of view; reporting a millimetre value would be an invented
+number rather than a measurement.
+The descriptor importances of the fitted tree are the direct
+answer to which features are suitable here: skeleton per
+diagonal carries 0.94 of the total importance, while roundness
+and eccentricity together contribute under 0.04. That ordering
+is what the task implies. A crack is identified by a connected
+structure of sufficient length, and its precise outline is ir-
+relevant, so descriptors that encode outline detail are dead
+weight while the length and count of connected components
+are decisive. Logistic regression on the same ten descriptors
+reaches 0.981 five-fold accuracy against 0.970 for the tree,
+so the decision boundary is nearly linear in log-area and
+skeleton length, and the tree’s advantage is interpretability
+rather than capacity.
+B. CASE 2
+The cell pipeline follows the reference method [6] with two
+documented deviations. The reference enhances the nucleus
+by the colour ratio (R + B)/(2G), which is large where the
+nucleus is dark purple and the cytoplasm is pale. On this
+collection the crops contain a black padding frame, where
+G = 0 and the ratio is undefined, so the denominator is
+guarded as (R + B + 1)/(2G + 1) and the result is clipped
+to its 5th and 99th percentiles before scaling. The frame is
+additionally removed by cropping to the bounding box of the
+largest bright component. The clip limits are not cosmetic:
+the unguarded ratio reaches values above 50 on a handful
+of specular pixels against a median near 1, so a 1–99 clip
+pins both ends of the ramp and the thresholded nucleus
+collapses. Histogram equalization is deliberately not applied
+after the enhancement, because the ratio histogram is nearly
+unimodal and equalization pushes the cytoplasm above the
+TABLE 3: Case 2, per-subtype scores of the LDA classifier
+under five-fold stratified cross-validation.
+Subtype
+Precision
+Recall
+F1
+Support
+Eosinophil
+0.629
+0.360
+0.458
+400
+Lymphocyte
+0.588
+0.542
+0.564
+400
+Monocyte
+0.613
+0.805
+0.696
+400
+Neutrophil
+0.568
+0.677
+0.618
+400
+Macro average
+0.600
+0.596
+0.584
+1600
+threshold: measured on the subsample, the Otsu foreground
+share changes from 0.05 without equalization to 0.55 with it,
+which inverts the mask.
+The enhanced image is thresholded by Otsu, opened with
+a 3 × 3 element, closed with a 7 × 7 element, and filtered
+to the largest component above 400 pixels, which yields the
+nucleus. The cell body is obtained by fitting an ellipse to
+the nucleus contour and expanding it by a factor of 1.45,
+followed by a union with the nucleus so that the nucleus
+is a subset of the cell by construction. This replaces the
+reference method’s ellipse fit on a calibrated micrograph,
+which this collection does not provide, and it also replaces an
+intersection with a dark-pixel mask, which was measured to
+leave the nucleus as almost the whole cell. Under the ellipse
+expansion the nucleus occupies on average 0.417 of the cell
+mask, and the cytoplasm is the difference of the two.
+The thirteen features of the reference method’s families
+are computed per image: nucleus area, perimeter, roundness,
+solidity, eccentricity, nucleus-to-cell area ratio, and skeleton-
+length-to-area as a lobeness proxy, plus mean, standard de-
+viation, and 16-bin entropy of the luminance inside the nu-
+cleus and inside the cytoplasm. Linear discriminant analysis
+reaches 0.596 five-fold accuracy and naive Bayes 0.506; the
+better model, LDA, is reported in full in Table 3, and reaches
+macro-F1 0.584 on 1600 images. The confusion matrix in
+Table 3 is not uniform: its largest off-diagonal cell runs
+from eosinophils to neutrophils, followed by lymphocytes to
+monocytes, so the errors follow the two pairs whose nuclei
+are closest in size and granulation rather than spreading
+across all four subtypes.
+The errors are structured rather than uniform, and they do
+not follow the granulation axis as one might expect from the
+stain alone. Eosinophils and neutrophils exchange the most
+images, and lymphocytes and monocytes the second most,
+while monocytes are otherwise recovered well. Because the
+discriminating features here are area, area ratio, and entropy
+rather than outline detail, a neutrophil whose segmented
+nucleus merges two lobes into one component is described
+almost exactly like an eosinophil, and the intensity statistics
+do not separate them because both are densely granulated.
+This is the measured limitation of a largest-component de-
+scription on lobed nuclei.
+C. CASE 3
+The grain pipeline is the classical branch of the reference
+work [7]: Otsu threshold on the luminance, since the grain
+5
+
+======================================================================
+HALAMAN 6 dari 7
+======================================================================
+
+Muhammad Gauza Faliha: Digital Image Processing for Surface Defect, Blood Cell, and Grain Quality Analysis
+TABLE 4: Case 3, feature-group ablation, five-fold macro-F1
+on 1000 grains. Ranking is by the better of the two classifiers.
+Feature group
+kNN
+LinearSVC
+Best
+Rank
+Shape (9)
+0.956
+0.961
+0.961
+1
+Hu moments (7)
+0.803
+0.839
+0.839
+3
+Chain code (8)
+0.457
+0.523
+0.523
+4
+All (24)
+0.936
+0.955
+0.955
+2
+is bright and the background near black, closing with a 7 × 7
+element to fill specular holes, and retention of the largest
+connected component. An image whose second component
+exceeds 60% of the largest is discarded rather than resolved,
+since resolving it would require a watershed step that the
+assignment’s scope does not include; 0 of the sampled images
+were discarded this way, leaving 1000.
+Each retained grain contributes 24 features in three groups:
+nine morphological measurements (area, perimeter, major
+and minor axis from the fitted ellipse, aspect ratio, round-
+ness of (7), solidity, extent, equivalent diameter), seven Hu
+moments in the log form of (9), and the eight-bin chain-code
+histogram of (10).
+Table 4 is the ablation that answers the assignment’s ques-
+tion for this case, and the answer is negative in an informative
+way. Region shape alone is the strongest group and reaches
+macro-F1 0.961 with the better classifier; adding the seven
+Hu moments and the eight chain-code bins lowers macro-F1
+to 0.955. Both added groups carry less variety information
+than the nine shape measurements, so on a thousand grains
+they contribute variance rather than separation: chain code
+alone reaches only 0.523 and Hu moments alone 0.839,
+because the first-difference histogram of a closed convex
+grain is close to a constant across varieties The reported
+configuration is therefore LinearSVC on the morphological
+group, with per-variety scores in Table 5.
+The chain code deserves a comment because it is the
+descriptor the course block presents most prominently. It
+is the boundary descriptor par excellence when the classes
+differ in outline detail, such as a dented versus a smooth grain
+silhouette, and our result shows what happens when they do
+not: the variety difference here is a global proportion, major
+over minor axis, which a perimeter-normalized histogram of
+curvature symbols cannot express. The failure is a property
+of the class definition, not of the descriptor.
+Table 5 gives the per-variety breakdown. The residual
+errors are between the two long-grain varieties, whose axis
+ratios overlap, while Ipsala and Karacadag are separated
+almost perfectly, which again attributes the decision to shape
+rather than to intensity.
+D. COMPUTATIONAL COST
+Table 6 reports wall-clock time for each case on a single CPU
+core with no parallelism, including feature extraction and
+cross-validation. The crack case is the most expensive, and
+profiling attributes that cost to the per-component descriptor
+stage rather than to thresholding: loading, Otsu thresholding,
+TABLE 5: Case 3, per-variety scores of the LinearSVC
+classifier.
+Variety
+Precision
+Recall
+F1
+Support
+Arborio
+0.964
+0.935
+0.949
+200
+Basmati
+0.960
+0.950
+0.955
+200
+Ipsala
+0.995
+1.000
+0.998
+200
+Jasmine
+0.941
+0.955
+0.948
+200
+Karacadag
+0.946
+0.965
+0.955
+200
+TABLE 6: Measured wall-clock cost per case, single core,
+including feature extraction and cross-validation.
+Case
+Images
+Wall clock (s)
+Per image (ms)
+Crack (Case 1)
+1600
+439.3
+274.5
+WBC (Case 2)
+1600
+179.6
+112.3
+Rice (Case 3)
+1000
+3.3
+3.3
+TABLE 7: Feature suitability across the three cases: the
+descriptor family that carried the decision, and the failure
+mode measured in our own runs.
+Case
+Task type
+Winning family
+Measured failure
+mode
+Crack
+detection
+skeleton length
+and
+component
+count
+texture survives as
+many short
+components, so
+coverage runs
+opposite to
+intuition
+WBC
+segmentation
++
+typing
+nucleus area,
+area ratio, and
+entropy
+lobed nuclei are
+cut to their largest
+component, so a
+two-lobed
+neutrophil reads
+as an eosinophil
+Rice
+classification
+ellipse axis
+lengths, aspect
+ratio, and area
+the chain-code
+histogram cannot
+express a global
+proportion, so
+boundary detail
+adds variance;
+touching grains
+would force
+discarding rather
+than splitting
+and the morphological cleanup together take about 1.8 ms per
+image, while the contour, hull, and per-component distance-
+transform queries take about 50 ms, because a texture-heavy
+negative mask has many components. The cell case pays for
+the ratio-color enhancement and three sequential morpholog-
+ical passes; the grain case is cheapest because a single convex
+region needs one closing and one component pass.
+IV. DISCUSSION: WHICH FEATURES FOR WHICH CASE
+Table 7 is the paper’s answer to the assignment’s question. It
+maps each case to its task type, the descriptor family that
+carried the decision in our measurements, and the failure
+mode we actually observed.
+Three regularities hold across the cases.
+First, the useful feature complexity tracks the task’s de-
+cision boundary, not the object’s visual complexity. The
+6
+
+======================================================================
+HALAMAN 7 dari 7
+======================================================================
+
+Muhammad Gauza Faliha: Digital Image Processing for Surface Defect, Blood Cell, and Grain Quality Analysis
+crack decision is essentially one-dimensional, a thin structure
+spanning the frame, and a depth-four tree on ten features
+reaches 0.970 five-fold accuracy, matching the hand-built
+cascade. The grain decision is five-way over a global propor-
+tion, and the nine shape measurements suffice at macro-F1
+0.961 while the full 24-feature vector falls to 0.955. Adding
+descriptors helped in neither case; what helped was choosing
+the descriptor whose invariances match the class difference.
+Second, the morphological structuring-element size is a
+statement about the object’s scale and must be chosen before
+the descriptors, not after. Opening with a 3 × 3 element
+removes crack speckle without eroding the crack, but a larger
+element would delete the crack itself, since the crack width
+measured in Section III-A is only 16.5 pixels. In the cell case
+the element must be large enough to bridge nuclear lobes,
+and the ellipse expansion factor that defines the cell body
+is set by the cytoplasm’s extent rather than by the nucleus,
+which is why a dark-pixel intersection failed: the nucleus is
+the darkest structure in the image.
+Third, the descriptors that failed are informative, and one
+failed for a reason worth stating. The chain-code histogram
+is the boundary descriptor the course block develops in most
+detail, and it was the weakest grain group at 0.523, because a
+perimeter-normalized curvature histogram cannot encode the
+one property that separates these varieties, the axis ratio. Har-
+ris corners and Hough lines, surveyed in Section II-D, were
+not used at all: concrete cracks, cell nuclei, and rice grains are
+not junction- or line-structured objects. The general lesson is
+that a descriptor is suitable when the transformation group it
+is invariant to contains the nuisance variation of the data and
+excludes the class difference, and that this can be decided
+from the class definition before any classifier is trained.
+V. CONCLUSION
+Three classical pipelines were built for three different in-
+spection questions and measured on public data. Crack de-
+tection reaches accuracy 0.970 and F1 0.970 from gradient
+analysis, Otsu thresholding, morphological cleaning, and a
+ten-feature shape descriptor, with a measured crack width of
+16.5 pixels, and the experiment shows that the foreground-
+area rule which this task usually suggests is actively wrong
+on real surface texture. White blood cell subtyping reaches
+accuracy 0.596 with region and intensity features under a
+linear discriminant, after a guarded colour-ratio enhancement
+of the nucleus and an ellipse-expanded cell body. Rice vari-
+ety classification reaches macro-F1 0.961 from nine shape
+measurements alone, and the ablation shows the combined
+24-feature vector falling to 0.955: the Hu moments and
+the chain-code histogram contributed variance rather than
+separation because the varieties differ in a global proportion.
+Across the three cases the descriptor family that worked was
+predicted by the task type rather than by the object domain,
+and the descriptor that failed always failed by being invariant
+to the wrong transformation.
+Learned feature hierarchies are out of scope here by the
+assignment’s constraints, and the natural next step is to use
+these classical descriptors as the interpretable baseline that a
+convolutional model must beat, rather than replacing them.
+REFERENCES
+[1] N. Otsu, “A threshold selection method from gray-level histograms,”
+IEEE Trans. Syst., Man, Cybern., vol. 9, no. 1, pp. 62–66, Jan. 1979,
+10.1109/TSMC.1979.4310076.
+[2] J. Canny, “A computational approach to edge detection,” IEEE Trans.
+Pattern Anal. Mach. Intell., vol. PAMI-8, no. 6, pp. 679–698, Nov. 1986,
+10.1109/TPAMI.1986.4767851.
+[3] C. Harris and M. Stephens, “A combined corner and edge detector,” in
+Proc. Alvey Vision Conf., 1988, pp. 23.1–23.6, 10.5244/C.2.23.
+[4] R. O. Duda and P. E. Hart, “Use of the Hough transformation to detect
+lines and curves in pictures,” Commun. ACM, vol. 15, no. 1, pp. 11–15,
+Jan. 1972, 10.1145/361237.361242.
+[5] A. M. A. Talab, Z. Huang, F. Xi, and L. HaiMing, “Detection crack
+in image using Otsu method and multiple filtering in image process-
+ing techniques,” Optik, vol. 127, no. 3, pp. 1030–1033, Feb. 2016,
+10.1016/j.ijleo.2015.09.147.
+[6] J. Prinyakupt and C. Pluempitiwiriyawej, “Segmentation of white blood
+cells and comparison of cell morphology by linear and naïve Bayes classi-
+fiers,” BioMed. Eng. OnLine, vol. 14, art. 63, Jun. 2015, 10.1186/s12938-
+015-0037-1.
+[7] I. Cinar and M. Koklu, “Classification of rice varieties using artificial
+intelligence methods,” Int. J. Intell. Syst. Appl. Eng., vol. 7, no. 3, pp.
+188–194, Sep. 2019, 10.18201/ijisae.2019355381.
+[8] A. Mohan and S. Poobal, “Crack detection using image processing: A
+critical review and analysis,” Alexandria Eng. J., vol. 57, no. 2, pp. 787–
+798, Jun. 2018, 10.1016/j.aej.2017.01.020.
+[9] Ç. F. Özgenel, “Concrete crack images for classification,” Mendeley Data,
+V2, 2019, 10.17632/5y9wdsg2zt.2.
+[10] S. Dorafshan, R. J. Thomas, and M. Maguire, “SDNET2018: An annotated
+image dataset for non-contact concrete crack detection using deep con-
+volutional neural networks,” Data in Brief, vol. 21, pp. 1664–1668, Dec.
+2018, 10.1016/j.dib.2018.11.015.
+[11] M. Koklu, I. Cinar, and Y. S. Taspinar, “Classification of rice varieties with
+deep learning methods,” Comput. Electron. Agric., vol. 187, art. 106285,
+Aug. 2021, 10.1016/j.compag.2021.106285.
+[12] P. Mooney, “Blood cell images,” Kaggle dataset, accessed Nov. 13, 2026.
+[Online]. Available: https://www.kaggle.com/paultimothymooney/blood-
+cells
+[13] R. C. Gonzalez and R. E. Woods, Digital Image Processing, 4th ed. New
+York, NY, USA: Pearson, 2018.
+[14] Wahyono, “Morphological processing,” “Image feature extraction (edge
+detection),” “Image feature extraction (corner and line),” and “Feature
+representation (edge-based),” Digital Image Processing course handouts,
+Dept. Comput. Sci. Electron., Universitas Gadjah Mada, Yogyakarta,
+Indonesia, n.d.
+7

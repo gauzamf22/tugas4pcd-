@@ -1,0 +1,107 @@
+CATATAN KASUS 3
+Klasifikasi Varietas Beras dari Deskriptor Batas dan Wilayah
+
+1. LATAR BELAKANG
+
+Identifikasi varietas beras secara visual diperlukan dalam perdagangan dan
+kendali mutu. Varietas dibedakan terutama oleh PROPORSI global butir (rasio
+sumbu panjang terhadap sumbu pendek) dan oleh detail bentuk tepi. Kasus ini
+dipilih karena pertanyaannya bersifat KLASIFIKASI: yang dicari adalah kategori
+objek, sehingga deskriptor yang sesuai adalah yang invarian terhadap posisi dan
+rotasi.
+
+
+2. DATASET
+
+Sumber     : Rice Image Dataset (Kaggle)
+URL        : https://www.kaggle.com/datasets/muratkokludataset/rice-image-dataset
+Lisensi    : CC0 Public Domain
+Ukuran     : 267,4 MB (230,1 MB terunduh), 75.000 citra
+Resolusi   : 250 x 250 piksel, JPEG, latar hampir hitam seragam
+Kelas      : Arborio, Basmati, Ipsala, Jasmine, Karacadag
+Dipakai    : 200 citra per varietas = 1.000 citra, stratified, random_state=42
+Dibuang    : 0 citra (tidak ada butir yang menyentuh butir lain di subsampel)
+
+
+3. METODE
+
+a. Segmentasi butir
+   Otsu langsung pada grayscale, karena butir terang dan latar hampir hitam,
+   lalu closing elips 7x7 untuk menutup lubang spekular. Komponen terhubung
+   terbesar dipertahankan. Jika komponen kedua melebihi 60% dari yang terbesar,
+   citra dibuang, bukan dipecahkan, karena pemecahan memerlukan watershed yang
+   di luar cakupan tugas.
+
+b. Deskriptor bentuk (9 fitur, Topik 10)
+   Luas, keliling, sumbu mayor dan minor dari fitEllipse, rasio aspek,
+   roundness = 4(pi)A/P^2, solidity, extent, dan diameter ekivalen.
+
+c. Momen Hu (7 fitur)
+   Tujuh momen Hu ternormalisasi, ditransformasi ke bentuk log
+   h = -sign(phi) log10(|phi|) agar rentang dinamisnya sebanding dan layak
+   menjadi masukan pengklasifikasi.
+
+d. Deskriptor batas (8 fitur)
+   Chain code Freeman 8 arah dari kontur terbesar, lalu diambil histogram
+   selisih pertama (first difference) modulo 8 dan dinormalisasi. Ini adalah
+   representasi shape number dari materi Topik 10, dipadatkan menjadi vektor
+   tetap 8 dimensi.
+
+e. Pengklasifikasi
+   k-Nearest Neighbor (k=5) dan LinearSVC pada fitur terstandardisasi,
+   5-fold stratified cross validation, seed tetap.
+
+
+4. HASIL
+
+Tabel 1. Ablasi kelompok fitur, macro-F1 pada 1.000 butir.
+
+  Kelompok fitur     kNN     LinearSVC   Terbaik   Peringkat
+  -----------------------------------------------------------
+  Bentuk (9)         0,956   0,961       0,961     1
+  Momen Hu (7)       0,803   0,839       0,839     3
+  Chain code (8)     0,457   0,523       0,523     4
+  Semua (24)         0,936   0,955       0,955     2
+
+Tabel 2. Skor per varietas, pengklasifikasi terbaik (LinearSVC, bentuk saja).
+
+  Varietas     Precision   Recall   F1      Support
+  ---------------------------------------------------
+  Arborio      0,964       0,935    0,949   200
+  Basmati      0,960       0,950    0,955   200
+  Ipsala       0,995       1,000    0,998   200
+  Jasmine      0,941       0,955    0,948   200
+  Karacadag    0,946       0,965    0,955   200
+
+Akurasi keseluruhan : 0,961
+Macro-F1            : 0,961
+Waktu proses        : 3,3 detik untuk 1.000 citra (3,3 ms per citra)
+
+
+5. TEMUAN PENTING
+
+a. Menambah fitur justru MENURUNKAN hasil.
+   Bentuk saja mencapai macro-F1 0,961. Vektor gabungan 24 fitur turun menjadi
+   0,955. Momen Hu (0,839) dan chain code (0,523) membawa lebih sedikit
+   informasi varietas daripada sembilan ukuran bentuk, sehingga pada seribu
+   butir keduanya menyumbang varians, bukan pemisahan.
+
+b. Chain code gagal karena alasan yang bisa dijelaskan.
+   Histogram selisih pertama dari butir yang tertutup dan konveks hampir
+   konstan antar varietas. Yang membedakan varietas di sini adalah proporsi
+   global (rasio sumbu), dan histogram kelengkungan yang dinormalisasi keliling
+   tidak dapat menyatakan besaran global itu. Kegagalannya sifat definisi kelas,
+   bukan cacat deskriptornya.
+
+c. Kesalahan sisa ada di antara dua varietas berbutir panjang.
+   Arborio dan Jasmine berbagi off-diagonal terbanyak, karena rasio sumbunya
+   bertumpang tindih. Ipsala dan Karacadag terpisah hampir sempurna. Pola ini
+   menegaskan bahwa keputusan dibawa oleh bentuk, bukan intensitas.
+
+d. Pembelajaran yang bisa dibawa: sebuah deskriptor cocok jika kelompok
+   transformasi yang membuatnya invarian memuat variasi pengganggu pada data,
+   tetapi TIDAK memuat pembeda kelas. Untuk butir beras, rasio sumbu adalah
+   pembeda kelasnya, sehingga deskriptor yang membuang informasi skala dan
+   proporsi tidak akan berhasil, sekuat apa pun deskriptor itu secara umum.
+
+
