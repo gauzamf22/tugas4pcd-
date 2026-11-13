@@ -3,8 +3,11 @@
 Identitas : 
 
 Nama : Muhammad Gauza Faliha 
+
 NIM : 25/555851/PA/23315 
+
 Kelas : KOM A 
+
 Program Studi : Ilmu Komputer 
 
 ## Isi
